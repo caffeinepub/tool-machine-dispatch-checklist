@@ -1,6 +1,7 @@
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import {
+  AlertTriangle,
   ArrowLeft,
   Camera,
   CheckCircle2,
@@ -8,9 +9,13 @@ import {
   ChevronRight,
   Circle,
   Expand,
+  Loader2,
+  ScanLine,
+  XCircle,
 } from "lucide-react";
 import { useState } from "react";
 import type { Dispatch } from "../../types";
+import { MATCH_THRESHOLD, compareImages } from "../../utils/imageCompare";
 import CameraCapture from "../shared/CameraCapture";
 import OfflineBanner from "../shared/OfflineBanner";
 import PhotoLightbox from "../shared/PhotoLightbox";
@@ -20,6 +25,8 @@ interface Props {
   onComplete: (updated: Dispatch) => void;
   onBack: () => void;
 }
+
+type VerifyState = "idle" | "verifying" | "matched" | "no_match";
 
 export default function ChecklistScreen({
   dispatch,
@@ -33,49 +40,115 @@ export default function ChecklistScreen({
     src: string;
     caption: string;
   } | null>(null);
+  const [verifyState, setVerifyState] = useState<VerifyState>("idle");
+  const [similarityScore, setSimilarityScore] = useState<number | null>(null);
 
   const total = items.length;
   const captured = items.filter((i) => i.captured).length;
   const currentItem = items[currentIndex];
   const progress = (captured / total) * 100;
+  const hasReference = !!currentItem.referencePhotoDataUrl;
 
-  const handleCapture = (dataUrl: string) => {
-    const now = new Date().toISOString();
-    navigator.geolocation.getCurrentPosition(
-      (pos) => {
-        setItems((prev) =>
-          prev.map((item, idx) =>
-            idx === currentIndex
-              ? {
-                  ...item,
-                  captured: true,
-                  photoDataUrl: dataUrl,
-                  timestamp: now,
-                  location: {
-                    lat: pos.coords.latitude,
-                    lng: pos.coords.longitude,
-                  },
-                }
-              : item,
-          ),
-        );
-      },
-      () => {
-        setItems((prev) =>
-          prev.map((item, idx) =>
-            idx === currentIndex
-              ? {
-                  ...item,
-                  captured: true,
-                  photoDataUrl: dataUrl,
-                  timestamp: now,
-                }
-              : item,
-          ),
-        );
-      },
-    );
+  const runVerification = async (dataUrl: string, refUrl: string) => {
+    setVerifyState("verifying");
+    // Small delay for UX feel
+    await new Promise((r) => setTimeout(r, 1500));
+    const score = await compareImages(refUrl, dataUrl);
+    setSimilarityScore(score);
+    const matched = score >= MATCH_THRESHOLD;
+    setVerifyState(matched ? "matched" : "no_match");
+    return matched;
+  };
+
+  const handleCapture = async (dataUrl: string) => {
     setShowCamera(false);
+    const now = new Date().toISOString();
+
+    const applyCapture = (matched?: boolean) => {
+      navigator.geolocation.getCurrentPosition(
+        (pos) => {
+          setItems((prev) =>
+            prev.map((item, idx) =>
+              idx === currentIndex
+                ? {
+                    ...item,
+                    captured: matched !== false,
+                    photoDataUrl: dataUrl,
+                    timestamp: now,
+                    location: {
+                      lat: pos.coords.latitude,
+                      lng: pos.coords.longitude,
+                    },
+                    verificationStatus:
+                      matched === true
+                        ? "matched"
+                        : matched === false
+                          ? "no_match"
+                          : "pending",
+                  }
+                : item,
+            ),
+          );
+        },
+        () => {
+          setItems((prev) =>
+            prev.map((item, idx) =>
+              idx === currentIndex
+                ? {
+                    ...item,
+                    captured: matched !== false,
+                    photoDataUrl: dataUrl,
+                    timestamp: now,
+                    verificationStatus:
+                      matched === true
+                        ? "matched"
+                        : matched === false
+                          ? "no_match"
+                          : "pending",
+                  }
+                : item,
+            ),
+          );
+        },
+      );
+    };
+
+    if (hasReference) {
+      // Store the photo but not mark as captured yet -- wait for verification
+      setItems((prev) =>
+        prev.map((item, idx) =>
+          idx === currentIndex
+            ? { ...item, photoDataUrl: dataUrl, captured: false }
+            : item,
+        ),
+      );
+      const matched = await runVerification(
+        dataUrl,
+        currentItem.referencePhotoDataUrl!,
+      );
+      applyCapture(matched);
+    } else {
+      // No reference -- accept any photo
+      applyCapture(undefined);
+    }
+  };
+
+  const handleRetake = () => {
+    setVerifyState("idle");
+    setSimilarityScore(null);
+    setItems((prev) =>
+      prev.map((item, idx) =>
+        idx === currentIndex
+          ? {
+              ...item,
+              captured: false,
+              photoDataUrl: undefined,
+              verificationStatus: undefined,
+            }
+          : item,
+      ),
+    );
+    setShowCamera(true);
   };
 
   const handleNotesChange = (value: string) => {
@@ -87,6 +160,8 @@ export default function ChecklistScreen({
   };
 
   const handleNext = () => {
+    setVerifyState("idle");
+    setSimilarityScore(null);
     if (currentIndex < total - 1) {
       setCurrentIndex(currentIndex + 1);
     } else {
@@ -95,7 +170,15 @@ export default function ChecklistScreen({
   };
 
   const handlePrev = () => {
+    setVerifyState("idle");
+    setSimilarityScore(null);
     if (currentIndex > 0) setCurrentIndex(currentIndex - 1);
+  };
+
+  const handleItemSwitch = (idx: number) => {
+    setVerifyState("idle");
+    setSimilarityScore(null);
+    setCurrentIndex(idx);
   };
 
   const formatTime = (iso?: string) => {
@@ -105,6 +188,11 @@ export default function ChecklistScreen({
       minute: "2-digit",
     });
   };
+
+  const isNextBlocked =
+    !currentItem.captured ||
+    verifyState === "verifying" ||
+    verifyState === "no_match";
 
   return (
     <>
@@ -166,7 +254,7 @@ export default function ChecklistScreen({
                 key={item.name}
                 type="button"
                 data-ocid={`checklist.item.${idx + 1}`}
-                onClick={() => setCurrentIndex(idx)}
+                onClick={() => handleItemSwitch(idx)}
                 aria-label={`${item.name} - ${item.captured ? "captured" : "not captured"}`}
                 className={`flex-shrink-0 flex flex-col items-center gap-1 p-2 rounded-xl border transition-all ${
                   idx === currentIndex
@@ -203,12 +291,12 @@ export default function ChecklistScreen({
               </span>
               {currentItem.captured && (
                 <span className="ml-auto inline-flex items-center gap-1 text-xs font-semibold text-success">
-                  <CheckCircle2 className="w-3 h-3" /> Captured
+                  <CheckCircle2 className="w-3 h-3" /> Verified
                 </span>
               )}
             </div>
 
-            <div className="flex flex-col items-center gap-3 py-4">
+            <div className="flex flex-col items-center gap-3 py-2">
               <span className="text-6xl" aria-hidden="true">
                 {currentItem.icon}
               </span>
@@ -217,69 +305,47 @@ export default function ChecklistScreen({
               </h2>
             </div>
 
-            {currentItem.captured && currentItem.photoDataUrl ? (
-              <div className="flex flex-col gap-3">
+            {/* Reference photo (admin-set) */}
+            {hasReference && (
+              <div className="rounded-xl border border-primary/30 bg-primary/5 p-3">
+                <p className="text-xs font-semibold text-primary mb-2 flex items-center gap-1.5">
+                  <ScanLine className="w-3.5 h-3.5" aria-hidden="true" /> Admin
+                  Reference Photo
+                </p>
                 <button
                   type="button"
-                  data-ocid="checklist.button"
                   onClick={() =>
                     setLightbox({
-                      src: currentItem.photoDataUrl!,
-                      caption: `${currentItem.name}${currentItem.timestamp ? ` · ${formatTime(currentItem.timestamp)}` : ""}`,
+                      src: currentItem.referencePhotoDataUrl!,
+                      caption: `${currentItem.name} — Admin Reference`,
                     })
                   }
-                  aria-label={`View ${currentItem.name} photo full size`}
-                  className="relative rounded-xl overflow-hidden bg-black group"
-                  style={{ aspectRatio: "4/3" }}
+                  aria-label="View admin reference photo"
+                  className="w-full rounded-lg overflow-hidden relative group"
+                  style={{ aspectRatio: "16/7" }}
                 >
                   <img
-                    src={currentItem.photoDataUrl}
-                    alt={currentItem.name}
+                    src={currentItem.referencePhotoDataUrl}
+                    alt={`${currentItem.name} admin reference`}
                     className="w-full h-full object-cover group-hover:brightness-75 transition-all"
                   />
-                  <div className="absolute bottom-0 left-0 right-0 bg-black/60 px-3 py-2 flex items-center justify-between">
-                    <span className="text-xs text-white/80">
-                      {currentItem.location
-                        ? `${currentItem.location.lat.toFixed(4)}, ${currentItem.location.lng.toFixed(4)}`
-                        : "Location captured"}
-                    </span>
-                    <span className="text-xs text-white/80">
-                      {formatTime(currentItem.timestamp)}
-                    </span>
-                  </div>
-                  {/* Expand hint overlay */}
                   <div className="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
-                    <div className="bg-black/50 rounded-full p-2">
+                    <div className="bg-black/50 rounded-full p-1.5">
                       <Expand
-                        className="w-5 h-5 text-white"
+                        className="w-4 h-4 text-white"
                         aria-hidden="true"
                       />
                     </div>
                   </div>
-                  <button
-                    type="button"
-                    data-ocid="checklist.secondary_button"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      setShowCamera(true);
-                    }}
-                    className="absolute top-2 right-2 bg-black/50 rounded-lg px-2 py-1 text-xs text-white flex items-center gap-1"
-                  >
-                    <Camera className="w-3 h-3" aria-hidden="true" /> Retake
-                  </button>
                 </button>
-
-                {/* Notes textarea */}
-                <Textarea
-                  data-ocid="checklist.textarea"
-                  value={currentItem.notes ?? ""}
-                  onChange={(e) => handleNotesChange(e.target.value)}
-                  placeholder="Add notes for this item..."
-                  className="bg-input border-border text-sm resize-none"
-                  rows={2}
-                />
+                <p className="text-xs text-primary/70 mt-2 text-center">
+                  Match your photo to this reference to proceed
+                </p>
               </div>
-            ) : (
+            )}
+
+            {/* Capture prompt or photo result */}
+            {!currentItem.photoDataUrl && verifyState === "idle" ? (
               <button
                 type="button"
                 data-ocid="checklist.primary_button"
@@ -289,13 +355,194 @@ export default function ChecklistScreen({
                 <div className="w-16 h-16 rounded-full bg-primary/10 border border-primary/30 flex items-center justify-center">
                   <Camera className="w-7 h-7 text-primary" aria-hidden="true" />
                 </div>
-                <span className="text-sm font-medium text-muted-foreground">
-                  Tap to capture photo
-                </span>
-                <span className="text-xs text-muted-foreground/60">
-                  Required to proceed
-                </span>
+                {hasReference ? (
+                  <>
+                    <span className="text-sm font-semibold text-foreground">
+                      Photograph or scan the product
+                    </span>
+                    <span className="text-xs text-muted-foreground text-center px-4">
+                      Take a clear photo of the{" "}
+                      <span className="text-primary font-medium">
+                        {currentItem.name}
+                      </span>{" "}
+                      you are placing in the toolkit
+                    </span>
+                    <span className="text-xs text-muted-foreground/60">
+                      It must match the admin reference above
+                    </span>
+                  </>
+                ) : (
+                  <>
+                    <span className="text-sm font-medium text-muted-foreground">
+                      Tap to capture photo
+                    </span>
+                    <span className="text-xs text-muted-foreground/60">
+                      Required to proceed
+                    </span>
+                  </>
+                )}
               </button>
+            ) : (
+              <div className="flex flex-col gap-3">
+                {/* Verifying spinner */}
+                {verifyState === "verifying" && (
+                  <div className="rounded-xl border border-primary/30 bg-primary/5 flex flex-col items-center gap-3 py-6">
+                    <Loader2
+                      className="w-8 h-8 text-primary animate-spin"
+                      aria-hidden="true"
+                    />
+                    <p className="text-sm font-semibold text-foreground">
+                      Verifying match...
+                    </p>
+                    <p className="text-xs text-muted-foreground">
+                      Comparing with admin reference
+                    </p>
+                  </div>
+                )}
+
+                {/* Captured photo */}
+                {currentItem.photoDataUrl && (
+                  <div className="flex flex-col gap-2">
+                    {hasReference && (
+                      <p className="text-xs font-semibold text-muted-foreground">
+                        Your photo
+                      </p>
+                    )}
+                    <button
+                      type="button"
+                      data-ocid="checklist.button"
+                      onClick={() =>
+                        setLightbox({
+                          src: currentItem.photoDataUrl!,
+                          caption: `${currentItem.name}${
+                            currentItem.timestamp
+                              ? ` · ${formatTime(currentItem.timestamp)}`
+                              : ""
+                          }`,
+                        })
+                      }
+                      aria-label={`View ${currentItem.name} photo full size`}
+                      className="relative rounded-xl overflow-hidden bg-black group"
+                      style={{ aspectRatio: "4/3" }}
+                    >
+                      <img
+                        src={currentItem.photoDataUrl}
+                        alt={currentItem.name}
+                        className="w-full h-full object-cover group-hover:brightness-75 transition-all"
+                      />
+                      <div className="absolute bottom-0 left-0 right-0 bg-black/60 px-3 py-2 flex items-center justify-between">
+                        <span className="text-xs text-white/80">
+                          {currentItem.location
+                            ? `${currentItem.location.lat.toFixed(4)}, ${currentItem.location.lng.toFixed(4)}`
+                            : "Location captured"}
+                        </span>
+                        <span className="text-xs text-white/80">
+                          {formatTime(currentItem.timestamp)}
+                        </span>
+                      </div>
+                      <div className="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
+                        <div className="bg-black/50 rounded-full p-2">
+                          <Expand
+                            className="w-5 h-5 text-white"
+                            aria-hidden="true"
+                          />
+                        </div>
+                      </div>
+                    </button>
+                  </div>
+                )}
+
+                {/* Verification result */}
+                {verifyState === "matched" && (
+                  <div className="rounded-xl border border-success/40 bg-success/10 flex items-center gap-3 px-4 py-3">
+                    <CheckCircle2
+                      className="w-5 h-5 text-success flex-shrink-0"
+                      aria-hidden="true"
+                    />
+                    <div>
+                      <p className="text-sm font-semibold text-success">
+                        Photo matched!
+                      </p>
+                      {similarityScore !== null && (
+                        <p className="text-xs text-success/70">
+                          Similarity: {Math.round(similarityScore * 100)}% — you
+                          can proceed
+                        </p>
+                      )}
+                    </div>
+                  </div>
+                )}
+
+                {verifyState === "no_match" && (
+                  <div className="rounded-xl border border-destructive/40 bg-destructive/10 flex flex-col gap-2 px-4 py-3">
+                    <div className="flex items-center gap-3">
+                      <XCircle
+                        className="w-5 h-5 text-destructive flex-shrink-0"
+                        aria-hidden="true"
+                      />
+                      <div>
+                        <p className="text-sm font-semibold text-destructive">
+                          Photo does not match
+                        </p>
+                        {similarityScore !== null && (
+                          <p className="text-xs text-destructive/70">
+                            Similarity: {Math.round(similarityScore * 100)}% —
+                            minimum required:{" "}
+                            {Math.round(MATCH_THRESHOLD * 100)}%
+                          </p>
+                        )}
+                      </div>
+                    </div>
+                    <p className="text-xs text-muted-foreground">
+                      Make sure you are photographing the correct item as shown
+                      in the admin reference. Try again in good lighting.
+                    </p>
+                    <Button
+                      size="sm"
+                      data-ocid="checklist.retake_button"
+                      onClick={handleRetake}
+                      className="mt-1 bg-destructive hover:bg-destructive/90 text-destructive-foreground gap-2"
+                    >
+                      <Camera className="w-3.5 h-3.5" aria-hidden="true" />{" "}
+                      Retake Photo
+                    </Button>
+                  </div>
+                )}
+
+                {/* No reference: retake + notes */}
+                {verifyState === "idle" && currentItem.captured && (
+                  <>
+                    <button
+                      type="button"
+                      data-ocid="checklist.secondary_button"
+                      onClick={() => setShowCamera(true)}
+                      className="self-start bg-card border border-border rounded-lg px-3 py-1.5 text-xs text-muted-foreground flex items-center gap-1.5 hover:border-primary/50 transition-all"
+                    >
+                      <Camera className="w-3 h-3" aria-hidden="true" /> Retake
+                    </button>
+                    <Textarea
+                      data-ocid="checklist.textarea"
+                      value={currentItem.notes ?? ""}
+                      onChange={(e) => handleNotesChange(e.target.value)}
+                      placeholder="Add notes for this item..."
+                      className="bg-input border-border text-sm resize-none"
+                      rows={2}
+                    />
+                  </>
+                )}
+
+                {/* After match success: notes */}
+                {verifyState === "matched" && (
+                  <Textarea
+                    data-ocid="checklist.textarea"
+                    value={currentItem.notes ?? ""}
+                    onChange={(e) => handleNotesChange(e.target.value)}
+                    placeholder="Add notes for this item..."
+                    className="bg-input border-border text-sm resize-none"
+                    rows={2}
+                  />
+                )}
+              </div>
             )}
           </div>
 
@@ -314,16 +561,40 @@ export default function ChecklistScreen({
             <Button
               data-ocid="checklist.primary_button"
               onClick={handleNext}
-              disabled={!currentItem.captured}
+              disabled={isNextBlocked}
               className="flex-1 bg-primary hover:bg-primary/90 disabled:opacity-40 gap-2"
               style={{ height: "52px" }}
             >
-              {currentIndex === total - 1 ? "Finish ✓" : "Next"}
-              {currentIndex < total - 1 && (
-                <ChevronRight className="w-4 h-4" aria-hidden="true" />
+              {verifyState === "verifying" ? (
+                <>
+                  <Loader2
+                    className="w-4 h-4 animate-spin"
+                    aria-hidden="true"
+                  />{" "}
+                  Verifying...
+                </>
+              ) : currentIndex === total - 1 ? (
+                "Finish ✓"
+              ) : (
+                <>
+                  Next
+                  <ChevronRight className="w-4 h-4" aria-hidden="true" />
+                </>
               )}
             </Button>
           </div>
+
+          {/* Blocked hint */}
+          {verifyState === "no_match" && (
+            <div className="flex items-center gap-2 text-xs text-destructive pb-2">
+              <AlertTriangle
+                className="w-3.5 h-3.5 flex-shrink-0"
+                aria-hidden="true"
+              />
+              You must retake the photo and match the admin reference to
+              continue.
+            </div>
+          )}
         </main>
       </div>
     </>

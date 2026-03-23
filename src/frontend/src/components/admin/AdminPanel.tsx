@@ -11,19 +11,24 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   Bell,
   Camera,
+  CheckCircle2,
   ClipboardList,
   LayoutDashboard,
   LogOut,
   Moon,
+  PackageCheck,
   Plus,
   QrCode,
   Sun,
+  Trash2,
   Users,
+  XCircle,
 } from "lucide-react";
+import type React from "react";
 import { useState } from "react";
 import { useTheme } from "../../hooks/useTheme";
-import type { AuthUser, Dispatch } from "../../types";
-import { MACHINE_TYPES } from "../../types";
+import type { AuthUser, Dispatch, ToolkitReferences } from "../../types";
+import { CHECKLIST_TEMPLATE, MACHINE_TYPES } from "../../types";
 import { formatDuration } from "../../utils/formatDuration";
 import OfflineBanner from "../shared/OfflineBanner";
 import PhotoLightbox from "../shared/PhotoLightbox";
@@ -32,6 +37,8 @@ import StatusBadge from "../shared/StatusBadge";
 interface Props {
   user: AuthUser;
   dispatches: Dispatch[];
+  toolkitReferences: ToolkitReferences;
+  onUpdateToolkitReferences: (refs: ToolkitReferences) => void;
   onLogout: () => void;
 }
 
@@ -64,6 +71,213 @@ function AxonLogo() {
       <path d="M16 4L28 28H4L16 4Z" fill="oklch(0.60 0.20 262)" />
       <path d="M16 10L24 26H8L16 10Z" fill="oklch(0.12 0.03 240)" />
     </svg>
+  );
+}
+
+interface ToolkitSetupProps {
+  references: ToolkitReferences;
+  onUpdate: (refs: ToolkitReferences) => void;
+}
+
+function ToolkitSetupTab({ references, onUpdate }: ToolkitSetupProps) {
+  const [cameraItem, setCameraItem] = useState<string | null>(null);
+  const [lightbox, setLightbox] = useState<{
+    src: string;
+    caption: string;
+  } | null>(null);
+  // Lazy import CameraCapture inline
+  const [CameraCapture, setCameraCapture] = useState<React.ComponentType<{
+    title: string;
+    onCapture: (dataUrl: string) => void;
+    onClose: () => void;
+  }> | null>(null);
+
+  const handleOpenCamera = async (itemName: string) => {
+    if (!CameraCapture) {
+      const mod = await import("../shared/CameraCapture");
+      setCameraCapture(() => mod.default);
+    }
+    setCameraItem(itemName);
+  };
+
+  const handleCapture = (dataUrl: string) => {
+    if (!cameraItem) return;
+    const updated = { ...references, [cameraItem]: dataUrl };
+    onUpdate(updated);
+    setCameraItem(null);
+  };
+
+  const handleRemove = (itemName: string) => {
+    const updated = { ...references };
+    delete updated[itemName];
+    onUpdate(updated);
+  };
+
+  const allSet = CHECKLIST_TEMPLATE.every((t) => !!references[t.name]);
+
+  return (
+    <>
+      {lightbox && (
+        <div
+          className="fixed inset-0 z-50 bg-black/90 flex items-center justify-center p-4"
+          onClick={() => setLightbox(null)}
+          onKeyDown={(e) => e.key === "Escape" && setLightbox(null)}
+          aria-modal="true"
+          aria-label="Reference photo viewer"
+          tabIndex={-1}
+        >
+          <img
+            src={lightbox.src}
+            alt={lightbox.caption}
+            className="max-w-full max-h-[80vh] rounded-xl object-contain"
+          />
+          <p className="absolute bottom-8 text-white/70 text-sm">
+            {lightbox.caption}
+          </p>
+        </div>
+      )}
+
+      {cameraItem && CameraCapture && (
+        <CameraCapture
+          title={`Set reference: ${cameraItem}`}
+          onCapture={handleCapture}
+          onClose={() => setCameraItem(null)}
+        />
+      )}
+
+      <div className="space-y-4">
+        <div className="card-panel p-5">
+          <div className="flex items-center gap-3 mb-1">
+            <PackageCheck className="w-5 h-5 text-primary" aria-hidden="true" />
+            <h2 className="font-semibold text-foreground">
+              Toolkit Reference Photos
+            </h2>
+          </div>
+          <p className="text-xs text-muted-foreground mb-4">
+            Set a reference photo for each toolkit item. Workers will need to
+            photograph and match these items before proceeding in the checklist.
+          </p>
+
+          {allSet && (
+            <div className="flex items-center gap-2 bg-success/10 border border-success/30 rounded-xl px-4 py-3 mb-4">
+              <CheckCircle2 className="w-4 h-4 text-success flex-shrink-0" />
+              <span className="text-sm text-success font-medium">
+                All {CHECKLIST_TEMPLATE.length} items have reference photos set
+              </span>
+            </div>
+          )}
+
+          <div className="space-y-3">
+            {CHECKLIST_TEMPLATE.map((item) => {
+              const ref = references[item.name];
+              return (
+                <div
+                  key={item.name}
+                  className={`flex items-center gap-3 p-3 rounded-xl border transition-all ${
+                    ref
+                      ? "border-success/30 bg-success/5"
+                      : "border-border bg-card/50"
+                  }`}
+                >
+                  <span className="text-2xl flex-shrink-0" aria-hidden="true">
+                    {item.icon}
+                  </span>
+                  <div className="flex-1 min-w-0">
+                    <p className="font-medium text-sm text-foreground">
+                      {item.name}
+                    </p>
+                    {ref ? (
+                      <div className="flex items-center gap-1 mt-0.5">
+                        <CheckCircle2 className="w-3 h-3 text-success" />
+                        <span className="text-xs text-success">
+                          Reference set
+                        </span>
+                      </div>
+                    ) : (
+                      <div className="flex items-center gap-1 mt-0.5">
+                        <XCircle className="w-3 h-3 text-muted-foreground" />
+                        <span className="text-xs text-muted-foreground">
+                          No reference photo
+                        </span>
+                      </div>
+                    )}
+                  </div>
+                  {ref && (
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setLightbox({
+                          src: ref,
+                          caption: `${item.name} reference`,
+                        })
+                      }
+                      aria-label={`View ${item.name} reference photo`}
+                      className="w-12 h-12 rounded-lg overflow-hidden flex-shrink-0 border border-border"
+                    >
+                      <img
+                        src={ref}
+                        alt={`${item.name} reference`}
+                        className="w-full h-full object-cover"
+                      />
+                    </button>
+                  )}
+                  <div className="flex gap-1.5 flex-shrink-0">
+                    <Button
+                      size="sm"
+                      variant={ref ? "outline" : "default"}
+                      data-ocid="toolkit.camera_button"
+                      onClick={() => handleOpenCamera(item.name)}
+                      className={`gap-1.5 ${!ref ? "bg-primary hover:bg-primary/90" : "border-border"}`}
+                    >
+                      <Camera className="w-3.5 h-3.5" aria-hidden="true" />
+                      {ref ? "Retake" : "Set Photo"}
+                    </Button>
+                    {ref && (
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        data-ocid="toolkit.remove_button"
+                        onClick={() => handleRemove(item.name)}
+                        aria-label={`Remove ${item.name} reference photo`}
+                        className="text-destructive hover:text-destructive hover:bg-destructive/10 px-2"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" aria-hidden="true" />
+                      </Button>
+                    )}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+
+        <div className="card-panel p-5 bg-primary/5 border-primary/20">
+          <h3 className="text-sm font-semibold text-foreground mb-2">
+            How it works
+          </h3>
+          <ol className="space-y-2">
+            {(
+              [
+                "Set a reference photo for each item above using the camera.",
+                "When a worker starts a dispatch, they will see your reference photo for each item.",
+                "They must photograph the actual product and the system will verify it matches.",
+                "If the photo does not match, they cannot proceed to the next item.",
+              ] as const
+            ).map((step, idx) => (
+              <li
+                key={step}
+                className="flex items-start gap-2 text-xs text-muted-foreground"
+              >
+                <span className="flex-shrink-0 w-4 h-4 rounded-full bg-primary/20 text-primary text-[10px] font-bold flex items-center justify-center mt-0.5">
+                  {idx + 1}
+                </span>
+                {step}
+              </li>
+            ))}
+          </ol>
+        </div>
+      </div>
+    </>
   );
 }
 
@@ -251,9 +465,16 @@ const NAV_TABS = [
   { value: "dispatches", icon: ClipboardList, label: "Dispatches" },
   { value: "workers", icon: Users, label: "Workers" },
   { value: "qr", icon: QrCode, label: "QR Generator" },
+  { value: "toolkit-setup", icon: PackageCheck, label: "Toolkit Setup" },
 ] as const;
 
-export default function AdminPanel({ user, dispatches, onLogout }: Props) {
+export default function AdminPanel({
+  user,
+  dispatches,
+  toolkitReferences,
+  onUpdateToolkitReferences,
+  onLogout,
+}: Props) {
   const [filterDate, setFilterDate] = useState("");
   const [filterWorker, setFilterWorker] = useState("all");
   const [filterMachine, setFilterMachine] = useState("all");
@@ -1077,6 +1298,13 @@ export default function AdminPanel({ user, dispatches, onLogout }: Props) {
 
           <TabsContent value="qr">
             <QRGeneratorTab />
+          </TabsContent>
+
+          <TabsContent value="toolkit-setup">
+            <ToolkitSetupTab
+              references={toolkitReferences}
+              onUpdate={onUpdateToolkitReferences}
+            />
           </TabsContent>
         </Tabs>
       </div>

@@ -8,11 +8,12 @@ import FinalVerification from "./components/worker/FinalVerification";
 import SuccessScreen from "./components/worker/SuccessScreen";
 import WorkerDashboard from "./components/worker/WorkerDashboard";
 import { SAMPLE_DISPATCHES } from "./data/sampleData";
-import type { AppScreen, AuthUser, Dispatch } from "./types";
+import type { AppScreen, AuthUser, Dispatch, ToolkitReferences } from "./types";
 import { CHECKLIST_TEMPLATE } from "./types";
 
 const STORAGE_KEY = "axon_dispatches";
 const AUTH_KEY = "axon_auth";
+const TOOLKIT_REF_KEY = "axon_toolkit_references";
 
 function loadDispatches(): Dispatch[] {
   try {
@@ -27,6 +28,16 @@ function loadDispatches(): Dispatch[] {
 
 function saveDispatches(dispatches: Dispatch[]) {
   localStorage.setItem(STORAGE_KEY, JSON.stringify(dispatches));
+}
+
+function loadToolkitReferences(): ToolkitReferences {
+  try {
+    const stored = localStorage.getItem(TOOLKIT_REF_KEY);
+    if (stored) return JSON.parse(stored);
+  } catch {
+    // ignore
+  }
+  return {};
 }
 
 export default function App() {
@@ -52,10 +63,18 @@ export default function App() {
   });
   const [dispatches, setDispatches] = useState<Dispatch[]>(loadDispatches);
   const [currentDispatch, setCurrentDispatch] = useState<Dispatch | null>(null);
+  const [toolkitReferences, setToolkitReferences] = useState<ToolkitReferences>(
+    loadToolkitReferences,
+  );
 
   useEffect(() => {
     saveDispatches(dispatches);
   }, [dispatches]);
+
+  const handleUpdateToolkitReferences = (refs: ToolkitReferences) => {
+    setToolkitReferences(refs);
+    localStorage.setItem(TOOLKIT_REF_KEY, JSON.stringify(refs));
+  };
 
   const handleLogin = (u: AuthUser) => {
     setUser(u);
@@ -89,6 +108,7 @@ export default function App() {
       checklistItems: CHECKLIST_TEMPLATE.map((t) => ({
         ...t,
         captured: false,
+        referencePhotoDataUrl: toolkitReferences[t.name],
       })),
       status: "pending",
       createdAt: now.toISOString(),
@@ -138,6 +158,8 @@ export default function App() {
         <AdminPanel
           user={user}
           dispatches={dispatches}
+          toolkitReferences={toolkitReferences}
+          onUpdateToolkitReferences={handleUpdateToolkitReferences}
           onLogout={handleLogout}
         />
         <Toaster />

@@ -6,6 +6,8 @@ export interface ChecklistItem {
   location?: { lat: number; lng: number };
   captured: boolean;
   notes?: string;
+  referencePhotoDataUrl?: string;
+  verificationStatus?: "pending" | "matched" | "no_match";
 }
 
 export interface Dispatch {
@@ -58,3 +60,5 @@ export const CHECKLIST_TEMPLATE: Omit<ChecklistItem, "captured">[] = [
   { name: "Bolts Kit", icon: "🔩" },
   { name: "Electrical Kit", icon: "⚡" },
 ];
+
+export type ToolkitReferences = Record<string, string>; // item name -> referencePhotoDataUrl
