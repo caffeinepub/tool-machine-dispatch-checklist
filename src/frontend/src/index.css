@@ -1,0 +1,170 @@
+@import url("https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700&family=Bricolage+Grotesque:wght@400;600;700;800&display=swap");
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --radius: 0.875rem;
+
+    /* Dark navy palette — always dark */
+    --background: 0.12 0.03 240;
+    --foreground: 0.93 0.018 240;
+    --card: 0.19 0.045 240;
+    --card-foreground: 0.93 0.018 240;
+    --popover: 0.22 0.05 240;
+    --popover-foreground: 0.93 0.018 240;
+
+    --primary: 0.6 0.2 262;
+    --primary-foreground: 0.98 0 0;
+
+    --secondary: 0.22 0.05 240;
+    --secondary-foreground: 0.75 0.03 240;
+
+    --muted: 0.19 0.045 240;
+    --muted-foreground: 0.62 0.04 240;
+
+    --accent: 0.28 0.05 240;
+    --accent-foreground: 0.93 0.018 240;
+
+    --destructive: 0.63 0.21 25;
+    --destructive-foreground: 0.98 0 0;
+
+    --border: 0.28 0.05 240;
+    --input: 0.22 0.05 240;
+    --ring: 0.6 0.2 262;
+
+    --success: 0.72 0.19 150;
+    --warning: 0.78 0.16 65;
+
+    --chart-1: 0.6 0.2 262;
+    --chart-2: 0.72 0.19 150;
+    --chart-3: 0.78 0.16 65;
+    --chart-4: 0.63 0.21 25;
+    --chart-5: 0.68 0.18 300;
+
+    --sidebar: 0.14 0.035 240;
+    --sidebar-foreground: 0.93 0.018 240;
+    --sidebar-primary: 0.6 0.2 262;
+    --sidebar-primary-foreground: 0.98 0 0;
+    --sidebar-accent: 0.22 0.05 240;
+    --sidebar-accent-foreground: 0.93 0.018 240;
+    --sidebar-border: 0.28 0.05 240;
+    --sidebar-ring: 0.6 0.2 262;
+  }
+
+  * {
+    @apply border-border;
+  }
+
+  html {
+    color-scheme: dark;
+  }
+
+  body {
+    @apply bg-background text-foreground;
+    font-family: "Plus Jakarta Sans", sans-serif;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+}
+
+@layer utilities {
+  .text-success {
+    color: oklch(var(--success));
+  }
+  .bg-success {
+    background-color: oklch(var(--success));
+  }
+  .text-warning {
+    color: oklch(var(--warning));
+  }
+  .bg-warning {
+    background-color: oklch(var(--warning));
+  }
+  .border-success {
+    border-color: oklch(var(--success));
+  }
+  .border-warning {
+    border-color: oklch(var(--warning));
+  }
+
+  .card-panel {
+    background: oklch(var(--card));
+    border: 1px solid oklch(var(--border));
+    border-radius: var(--radius);
+  }
+
+  .card-inner {
+    background: oklch(var(--popover));
+    border: 1px solid oklch(var(--border));
+    border-radius: calc(var(--radius) - 2px);
+  }
+
+  .font-display {
+    font-family: "Bricolage Grotesque", sans-serif;
+  }
+}
+
+@keyframes checkmark-draw {
+  from {
+    stroke-dashoffset: 100;
+  }
+  to {
+    stroke-dashoffset: 0;
+  }
+}
+
+@keyframes scale-in {
+  from {
+    transform: scale(0);
+    opacity: 0;
+  }
+  to {
+    transform: scale(1);
+    opacity: 1;
+  }
+}
+
+@keyframes fade-up {
+  from {
+    transform: translateY(16px);
+    opacity: 0;
+  }
+  to {
+    transform: translateY(0);
+    opacity: 1;
+  }
+}
+
+.animate-checkmark circle {
+  animation: scale-in 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275) forwards;
+}
+
+.animate-checkmark path {
+  stroke-dasharray: 100;
+  stroke-dashoffset: 100;
+  animation: checkmark-draw 0.5s ease-out 0.3s forwards;
+}
+
+.animate-fade-up {
+  animation: fade-up 0.5s ease-out forwards;
+}
+
+.animate-fade-up-delay-1 {
+  animation: fade-up 0.5s ease-out 0.1s forwards;
+  opacity: 0;
+}
+.animate-fade-up-delay-2 {
+  animation: fade-up 0.5s ease-out 0.2s forwards;
+  opacity: 0;
+}
+.animate-fade-up-delay-3 {
+  animation: fade-up 0.5s ease-out 0.3s forwards;
+  opacity: 0;
+}
+.animate-fade-up-delay-4 {
+  animation: fade-up 0.5s ease-out 0.4s forwards;
+  opacity: 0;
+}
