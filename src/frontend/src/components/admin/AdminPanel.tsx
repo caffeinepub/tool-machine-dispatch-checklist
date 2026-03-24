@@ -30,6 +30,7 @@ import { useTheme } from "../../hooks/useTheme";
 import type { AuthUser, Dispatch, ToolkitReferences } from "../../types";
 import { CHECKLIST_TEMPLATE, MACHINE_TYPES } from "../../types";
 import { formatDuration } from "../../utils/formatDuration";
+import { compressImage } from "../../utils/imageUtils";
 import OfflineBanner from "../shared/OfflineBanner";
 import PhotoLightbox from "../shared/PhotoLightbox";
 import StatusBadge from "../shared/StatusBadge";
@@ -92,12 +93,13 @@ function ToolkitSetupTab({ references, onUpdate }: ToolkitSetupProps) {
     fileInputRef.current?.click();
   };
 
-  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file || !activeItem) return;
     const reader = new FileReader();
-    reader.onload = (ev) => {
-      const dataUrl = ev.target?.result as string;
+    reader.onload = async (ev) => {
+      const raw = ev.target?.result as string;
+      const dataUrl = await compressImage(raw);
       onUpdate({ ...references, [activeItem]: dataUrl });
       setActiveItem(null);
     };

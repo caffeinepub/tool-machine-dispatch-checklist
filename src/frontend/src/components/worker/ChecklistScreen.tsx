@@ -16,6 +16,7 @@ import {
 import { useRef, useState } from "react";
 import type { Dispatch } from "../../types";
 import { MATCH_THRESHOLD, compareImages } from "../../utils/imageCompare";
+import { compressImage } from "../../utils/imageUtils";
 import OfflineBanner from "../shared/OfflineBanner";
 import PhotoLightbox from "../shared/PhotoLightbox";
 
@@ -128,16 +129,18 @@ export default function ChecklistScreen({
     }
   };
 
-  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
     const reader = new FileReader();
-    reader.onload = (ev) => {
-      const dataUrl = ev.target?.result as string;
-      if (dataUrl) handleCapture(dataUrl);
+    reader.onload = async (ev) => {
+      const raw = ev.target?.result as string;
+      if (raw) {
+        const dataUrl = await compressImage(raw);
+        handleCapture(dataUrl);
+      }
     };
     reader.readAsDataURL(file);
-    // Reset so same file can be selected again
     e.target.value = "";
   };
 

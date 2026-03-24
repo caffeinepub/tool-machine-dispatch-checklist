@@ -1,3 +1,4 @@
+import "./utils/backendPatch";
 import { Toaster } from "@/components/ui/sonner";
 import { useEffect, useState } from "react";
 import LoginScreen from "./components/LoginScreen";
