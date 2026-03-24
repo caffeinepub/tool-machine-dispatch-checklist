@@ -25,7 +25,7 @@ import {
   XCircle,
 } from "lucide-react";
 import type React from "react";
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { useTheme } from "../../hooks/useTheme";
 import type { AuthUser, Dispatch, ToolkitReferences } from "../../types";
 import { CHECKLIST_TEMPLATE, MACHINE_TYPES } from "../../types";
@@ -80,31 +80,29 @@ interface ToolkitSetupProps {
 }
 
 function ToolkitSetupTab({ references, onUpdate }: ToolkitSetupProps) {
-  const [cameraItem, setCameraItem] = useState<string | null>(null);
+  const [activeItem, setActiveItem] = useState<string | null>(null);
   const [lightbox, setLightbox] = useState<{
     src: string;
     caption: string;
   } | null>(null);
-  // Lazy import CameraCapture inline
-  const [CameraCapture, setCameraCapture] = useState<React.ComponentType<{
-    title: string;
-    onCapture: (dataUrl: string) => void;
-    onClose: () => void;
-  }> | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
-  const handleOpenCamera = async (itemName: string) => {
-    if (!CameraCapture) {
-      const mod = await import("../shared/CameraCapture");
-      setCameraCapture(() => mod.default);
-    }
-    setCameraItem(itemName);
+  const handleSetPhoto = (itemName: string) => {
+    setActiveItem(itemName);
+    fileInputRef.current?.click();
   };
 
-  const handleCapture = (dataUrl: string) => {
-    if (!cameraItem) return;
-    const updated = { ...references, [cameraItem]: dataUrl };
-    onUpdate(updated);
-    setCameraItem(null);
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file || !activeItem) return;
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      const dataUrl = ev.target?.result as string;
+      onUpdate({ ...references, [activeItem]: dataUrl });
+      setActiveItem(null);
+    };
+    reader.readAsDataURL(file);
+    e.target.value = "";
   };
 
   const handleRemove = (itemName: string) => {
@@ -137,13 +135,13 @@ function ToolkitSetupTab({ references, onUpdate }: ToolkitSetupProps) {
         </div>
       )}
 
-      {cameraItem && CameraCapture && (
-        <CameraCapture
-          title={`Set reference: ${cameraItem}`}
-          onCapture={handleCapture}
-          onClose={() => setCameraItem(null)}
-        />
-      )}
+      <input
+        ref={fileInputRef}
+        type="file"
+        accept="image/*"
+        className="hidden"
+        onChange={handleFileChange}
+      />
 
       <div className="space-y-4">
         <div className="card-panel p-5">
@@ -226,7 +224,7 @@ function ToolkitSetupTab({ references, onUpdate }: ToolkitSetupProps) {
                       size="sm"
                       variant={ref ? "outline" : "default"}
                       data-ocid="toolkit.camera_button"
-                      onClick={() => handleOpenCamera(item.name)}
+                      onClick={() => handleSetPhoto(item.name)}
                       className={`gap-1.5 ${!ref ? "bg-primary hover:bg-primary/90" : "border-border"}`}
                     >
                       <Camera className="w-3.5 h-3.5" aria-hidden="true" />

@@ -3,20 +3,19 @@ import { Textarea } from "@/components/ui/textarea";
 import {
   AlertTriangle,
   ArrowLeft,
-  Camera,
   CheckCircle2,
   ChevronLeft,
   ChevronRight,
   Circle,
   Expand,
+  ImageIcon,
   Loader2,
   ScanLine,
   XCircle,
 } from "lucide-react";
-import { useState } from "react";
+import { useRef, useState } from "react";
 import type { Dispatch } from "../../types";
 import { MATCH_THRESHOLD, compareImages } from "../../utils/imageCompare";
-import CameraCapture from "../shared/CameraCapture";
 import OfflineBanner from "../shared/OfflineBanner";
 import PhotoLightbox from "../shared/PhotoLightbox";
 
@@ -35,7 +34,7 @@ export default function ChecklistScreen({
 }: Props) {
   const [items, setItems] = useState(dispatch.checklistItems);
   const [currentIndex, setCurrentIndex] = useState(0);
-  const [showCamera, setShowCamera] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const [lightbox, setLightbox] = useState<{
     src: string;
     caption: string;
@@ -51,7 +50,6 @@ export default function ChecklistScreen({
 
   const runVerification = async (dataUrl: string, refUrl: string) => {
     setVerifyState("verifying");
-    // Small delay for UX feel
     await new Promise((r) => setTimeout(r, 1500));
     const score = await compareImages(refUrl, dataUrl);
     setSimilarityScore(score);
@@ -61,7 +59,6 @@ export default function ChecklistScreen({
   };
 
   const handleCapture = async (dataUrl: string) => {
-    setShowCamera(false);
     const now = new Date().toISOString();
 
     const applyCapture = (matched?: boolean) => {
@@ -114,7 +111,6 @@ export default function ChecklistScreen({
     };
 
     if (hasReference) {
-      // Store the photo but not mark as captured yet -- wait for verification
       setItems((prev) =>
         prev.map((item, idx) =>
           idx === currentIndex
@@ -128,9 +124,21 @@ export default function ChecklistScreen({
       );
       applyCapture(matched);
     } else {
-      // No reference -- accept any photo
       applyCapture(undefined);
     }
+  };
+
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      const dataUrl = ev.target?.result as string;
+      if (dataUrl) handleCapture(dataUrl);
+    };
+    reader.readAsDataURL(file);
+    // Reset so same file can be selected again
+    e.target.value = "";
   };
 
   const handleRetake = () => {
@@ -148,7 +156,7 @@ export default function ChecklistScreen({
           : item,
       ),
     );
-    setShowCamera(true);
+    fileInputRef.current?.click();
   };
 
   const handleNotesChange = (value: string) => {
@@ -204,13 +212,14 @@ export default function ChecklistScreen({
         />
       )}
 
-      {showCamera && (
-        <CameraCapture
-          title={`Capture: ${currentItem.name}`}
-          onCapture={handleCapture}
-          onClose={() => setShowCamera(false)}
-        />
-      )}
+      {/* Hidden file input */}
+      <input
+        ref={fileInputRef}
+        type="file"
+        accept="image/*"
+        className="hidden"
+        onChange={handleFileChange}
+      />
 
       <div className="min-h-screen bg-background flex flex-col max-w-[430px] mx-auto">
         <OfflineBanner />
@@ -349,19 +358,22 @@ export default function ChecklistScreen({
               <button
                 type="button"
                 data-ocid="checklist.primary_button"
-                onClick={() => setShowCamera(true)}
+                onClick={() => fileInputRef.current?.click()}
                 className="w-full border-2 border-dashed border-border rounded-xl flex flex-col items-center justify-center gap-3 py-8 hover:border-primary/50 hover:bg-primary/5 transition-all"
               >
                 <div className="w-16 h-16 rounded-full bg-primary/10 border border-primary/30 flex items-center justify-center">
-                  <Camera className="w-7 h-7 text-primary" aria-hidden="true" />
+                  <ImageIcon
+                    className="w-7 h-7 text-primary"
+                    aria-hidden="true"
+                  />
                 </div>
                 {hasReference ? (
                   <>
                     <span className="text-sm font-semibold text-foreground">
-                      Photograph or scan the product
+                      Click to select product photo
                     </span>
                     <span className="text-xs text-muted-foreground text-center px-4">
-                      Take a clear photo of the{" "}
+                      Select a clear photo of the{" "}
                       <span className="text-primary font-medium">
                         {currentItem.name}
                       </span>{" "}
@@ -374,7 +386,7 @@ export default function ChecklistScreen({
                 ) : (
                   <>
                     <span className="text-sm font-medium text-muted-foreground">
-                      Tap to capture photo
+                      Click to select photo
                     </span>
                     <span className="text-xs text-muted-foreground/60">
                       Required to proceed
@@ -482,7 +494,7 @@ export default function ChecklistScreen({
                       />
                       <div>
                         <p className="text-sm font-semibold text-destructive">
-                          Photo does not match
+                          Click again, the product is wrong
                         </p>
                         {similarityScore !== null && (
                           <p className="text-xs text-destructive/70">
@@ -494,8 +506,8 @@ export default function ChecklistScreen({
                       </div>
                     </div>
                     <p className="text-xs text-muted-foreground">
-                      Make sure you are photographing the correct item as shown
-                      in the admin reference. Try again in good lighting.
+                      Make sure you select the correct item matching the admin
+                      reference photo.
                     </p>
                     <Button
                       size="sm"
@@ -503,8 +515,8 @@ export default function ChecklistScreen({
                       onClick={handleRetake}
                       className="mt-1 bg-destructive hover:bg-destructive/90 text-destructive-foreground gap-2"
                     >
-                      <Camera className="w-3.5 h-3.5" aria-hidden="true" />{" "}
-                      Retake Photo
+                      <ImageIcon className="w-3.5 h-3.5" aria-hidden="true" />{" "}
+                      Click Again
                     </Button>
                   </div>
                 )}
@@ -515,10 +527,11 @@ export default function ChecklistScreen({
                     <button
                       type="button"
                       data-ocid="checklist.secondary_button"
-                      onClick={() => setShowCamera(true)}
+                      onClick={() => fileInputRef.current?.click()}
                       className="self-start bg-card border border-border rounded-lg px-3 py-1.5 text-xs text-muted-foreground flex items-center gap-1.5 hover:border-primary/50 transition-all"
                     >
-                      <Camera className="w-3 h-3" aria-hidden="true" /> Retake
+                      <ImageIcon className="w-3 h-3" aria-hidden="true" />{" "}
+                      Retake
                     </button>
                     <Textarea
                       data-ocid="checklist.textarea"
@@ -591,8 +604,7 @@ export default function ChecklistScreen({
                 className="w-3.5 h-3.5 flex-shrink-0"
                 aria-hidden="true"
               />
-              You must retake the photo and match the admin reference to
-              continue.
+              Click again and select the correct product to continue.
             </div>
           )}
         </main>
