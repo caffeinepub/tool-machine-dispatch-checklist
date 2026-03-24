@@ -15,8 +15,7 @@ import {
 } from "lucide-react";
 import { useRef, useState } from "react";
 import type { Dispatch } from "../../types";
-import { MATCH_THRESHOLD, compareImages } from "../../utils/imageCompare";
-import { compressImage } from "../../utils/imageUtils";
+import { compareImages, compressImage } from "../../utils/imageUtils";
 import OfflineBanner from "../shared/OfflineBanner";
 import PhotoLightbox from "../shared/PhotoLightbox";
 
@@ -26,7 +25,7 @@ interface Props {
   onBack: () => void;
 }
 
-type VerifyState = "idle" | "verifying" | "matched" | "no_match";
+type VerifyState = "idle" | "pending" | "verifying" | "matched" | "no_match";
 
 export default function ChecklistScreen({
   dispatch,
@@ -41,7 +40,10 @@ export default function ChecklistScreen({
     caption: string;
   } | null>(null);
   const [verifyState, setVerifyState] = useState<VerifyState>("idle");
-  const [similarityScore, setSimilarityScore] = useState<number | null>(null);
+  const [pendingPhotoDataUrl, setPendingPhotoDataUrl] = useState<string | null>(
+    null,
+  );
+  const [matchScore, setMatchScore] = useState<number | null>(null);
 
   const total = items.length;
   const captured = items.filter((i) => i.captured).length;
@@ -49,84 +51,54 @@ export default function ChecklistScreen({
   const progress = (captured / total) * 100;
   const hasReference = !!currentItem.referencePhotoDataUrl;
 
-  const runVerification = async (dataUrl: string, refUrl: string) => {
-    setVerifyState("verifying");
-    await new Promise((r) => setTimeout(r, 1500));
-    const score = await compareImages(refUrl, dataUrl);
-    setSimilarityScore(score);
-    const matched = score >= MATCH_THRESHOLD;
-    setVerifyState(matched ? "matched" : "no_match");
-    return matched;
-  };
-
-  const handleCapture = async (dataUrl: string) => {
+  const applyCapture = (dataUrl: string, matched?: boolean) => {
     const now = new Date().toISOString();
-
-    const applyCapture = (matched?: boolean) => {
-      navigator.geolocation.getCurrentPosition(
-        (pos) => {
-          setItems((prev) =>
-            prev.map((item, idx) =>
-              idx === currentIndex
-                ? {
-                    ...item,
-                    captured: matched !== false,
-                    photoDataUrl: dataUrl,
-                    timestamp: now,
-                    location: {
-                      lat: pos.coords.latitude,
-                      lng: pos.coords.longitude,
-                    },
-                    verificationStatus:
-                      matched === true
-                        ? "matched"
-                        : matched === false
-                          ? "no_match"
-                          : "pending",
-                  }
-                : item,
-            ),
-          );
-        },
-        () => {
-          setItems((prev) =>
-            prev.map((item, idx) =>
-              idx === currentIndex
-                ? {
-                    ...item,
-                    captured: matched !== false,
-                    photoDataUrl: dataUrl,
-                    timestamp: now,
-                    verificationStatus:
-                      matched === true
-                        ? "matched"
-                        : matched === false
-                          ? "no_match"
-                          : "pending",
-                  }
-                : item,
-            ),
-          );
-        },
-      );
-    };
-
-    if (hasReference) {
-      setItems((prev) =>
-        prev.map((item, idx) =>
-          idx === currentIndex
-            ? { ...item, photoDataUrl: dataUrl, captured: false }
-            : item,
-        ),
-      );
-      const matched = await runVerification(
-        dataUrl,
-        currentItem.referencePhotoDataUrl!,
-      );
-      applyCapture(matched);
-    } else {
-      applyCapture(undefined);
-    }
+    navigator.geolocation.getCurrentPosition(
+      (pos) => {
+        setItems((prev) =>
+          prev.map((item, idx) =>
+            idx === currentIndex
+              ? {
+                  ...item,
+                  captured: matched !== false,
+                  photoDataUrl: dataUrl,
+                  timestamp: now,
+                  location: {
+                    lat: pos.coords.latitude,
+                    lng: pos.coords.longitude,
+                  },
+                  verificationStatus:
+                    matched === true
+                      ? "matched"
+                      : matched === false
+                        ? "no_match"
+                        : "pending",
+                }
+              : item,
+          ),
+        );
+      },
+      () => {
+        setItems((prev) =>
+          prev.map((item, idx) =>
+            idx === currentIndex
+              ? {
+                  ...item,
+                  captured: matched !== false,
+                  photoDataUrl: dataUrl,
+                  timestamp: now,
+                  verificationStatus:
+                    matched === true
+                      ? "matched"
+                      : matched === false
+                        ? "no_match"
+                        : "pending",
+                }
+              : item,
+          ),
+        );
+      },
+    );
   };
 
   const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -135,18 +107,50 @@ export default function ChecklistScreen({
     const reader = new FileReader();
     reader.onload = async (ev) => {
       const raw = ev.target?.result as string;
-      if (raw) {
-        const dataUrl = await compressImage(raw);
-        handleCapture(dataUrl);
+      if (!raw) return;
+      const dataUrl = await compressImage(raw);
+      if (hasReference) {
+        // Show pending state with "Match Photo" button
+        setPendingPhotoDataUrl(dataUrl);
+        setMatchScore(null);
+        setVerifyState("pending");
+      } else {
+        // No reference — accept directly
+        applyCapture(dataUrl, undefined);
+        setVerifyState("matched");
       }
     };
     reader.readAsDataURL(file);
     e.target.value = "";
   };
 
+  const handleMatchPhoto = async () => {
+    if (!pendingPhotoDataUrl || !currentItem.referencePhotoDataUrl) return;
+    setVerifyState("verifying");
+    try {
+      const score = await compareImages(
+        currentItem.referencePhotoDataUrl,
+        pendingPhotoDataUrl,
+      );
+      setMatchScore(score);
+      if (score >= 0.45) {
+        applyCapture(pendingPhotoDataUrl, true);
+        setVerifyState("matched");
+      } else {
+        applyCapture(pendingPhotoDataUrl, false);
+        setVerifyState("no_match");
+      }
+    } catch {
+      setMatchScore(0);
+      applyCapture(pendingPhotoDataUrl, false);
+      setVerifyState("no_match");
+    }
+  };
+
   const handleRetake = () => {
     setVerifyState("idle");
-    setSimilarityScore(null);
+    setPendingPhotoDataUrl(null);
+    setMatchScore(null);
     setItems((prev) =>
       prev.map((item, idx) =>
         idx === currentIndex
@@ -172,7 +176,8 @@ export default function ChecklistScreen({
 
   const handleNext = () => {
     setVerifyState("idle");
-    setSimilarityScore(null);
+    setPendingPhotoDataUrl(null);
+    setMatchScore(null);
     if (currentIndex < total - 1) {
       setCurrentIndex(currentIndex + 1);
     } else {
@@ -182,13 +187,15 @@ export default function ChecklistScreen({
 
   const handlePrev = () => {
     setVerifyState("idle");
-    setSimilarityScore(null);
+    setPendingPhotoDataUrl(null);
+    setMatchScore(null);
     if (currentIndex > 0) setCurrentIndex(currentIndex - 1);
   };
 
   const handleItemSwitch = (idx: number) => {
     setVerifyState("idle");
-    setSimilarityScore(null);
+    setPendingPhotoDataUrl(null);
+    setMatchScore(null);
     setCurrentIndex(idx);
   };
 
@@ -201,9 +208,15 @@ export default function ChecklistScreen({
   };
 
   const isNextBlocked =
-    !currentItem.captured ||
+    (!currentItem.captured && verifyState !== "matched") ||
+    verifyState === "pending" ||
     verifyState === "verifying" ||
     verifyState === "no_match";
+
+  // Decide which photo to show in the captured display
+  const displayPhotoUrl =
+    currentItem.photoDataUrl ||
+    (verifyState === "pending" ? pendingPhotoDataUrl : null);
 
   return (
     <>
@@ -226,6 +239,7 @@ export default function ChecklistScreen({
 
       <div className="min-h-screen bg-background flex flex-col max-w-[430px] mx-auto">
         <OfflineBanner />
+
         {/* Header */}
         <header className="sticky top-0 z-10 bg-card/95 backdrop-blur border-b border-border px-4 py-3">
           <div className="flex items-center gap-3 mb-3">
@@ -317,7 +331,7 @@ export default function ChecklistScreen({
               </h2>
             </div>
 
-            {/* Reference photo (admin-set) */}
+            {/* Reference photo — always shown when set */}
             {hasReference && (
               <div className="rounded-xl border border-primary/30 bg-primary/5 p-3">
                 <p className="text-xs font-semibold text-primary mb-2 flex items-center gap-1.5">
@@ -351,13 +365,13 @@ export default function ChecklistScreen({
                   </div>
                 </button>
                 <p className="text-xs text-primary/70 mt-2 text-center">
-                  Match your photo to this reference to proceed
+                  Select your product photo and click "Match Photo" to verify
                 </p>
               </div>
             )}
 
-            {/* Capture prompt or photo result */}
-            {!currentItem.photoDataUrl && verifyState === "idle" ? (
+            {/* ── Idle: no photo selected yet ── */}
+            {verifyState === "idle" && !currentItem.photoDataUrl && (
               <button
                 type="button"
                 data-ocid="checklist.primary_button"
@@ -373,17 +387,14 @@ export default function ChecklistScreen({
                 {hasReference ? (
                   <>
                     <span className="text-sm font-semibold text-foreground">
-                      Click to select product photo
+                      Select Product Photo
                     </span>
                     <span className="text-xs text-muted-foreground text-center px-4">
-                      Select a clear photo of the{" "}
+                      Choose a photo of{" "}
                       <span className="text-primary font-medium">
                         {currentItem.name}
                       </span>{" "}
-                      you are placing in the toolkit
-                    </span>
-                    <span className="text-xs text-muted-foreground/60">
-                      It must match the admin reference above
+                      from your gallery to verify against the reference
                     </span>
                   </>
                 ) : (
@@ -397,30 +408,102 @@ export default function ChecklistScreen({
                   </>
                 )}
               </button>
-            ) : (
-              <div className="flex flex-col gap-3">
-                {/* Verifying spinner */}
-                {verifyState === "verifying" && (
-                  <div className="rounded-xl border border-primary/30 bg-primary/5 flex flex-col items-center gap-3 py-6">
-                    <Loader2
-                      className="w-8 h-8 text-primary animate-spin"
-                      aria-hidden="true"
-                    />
-                    <p className="text-sm font-semibold text-foreground">
-                      Verifying match...
-                    </p>
-                    <p className="text-xs text-muted-foreground">
-                      Comparing with admin reference
-                    </p>
-                  </div>
-                )}
+            )}
 
-                {/* Captured photo */}
-                {currentItem.photoDataUrl && (
+            {/* ── Pending: photo selected, awaiting Match Photo click ── */}
+            {verifyState === "pending" && pendingPhotoDataUrl && (
+              <div className="flex flex-col gap-3">
+                {/* Worker's selected photo preview */}
+                <div className="flex flex-col gap-1.5">
+                  <p className="text-xs font-semibold text-muted-foreground">
+                    Your Selected Photo
+                  </p>
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setLightbox({
+                        src: pendingPhotoDataUrl,
+                        caption: `${currentItem.name} — Your Photo`,
+                      })
+                    }
+                    aria-label="View selected photo full size"
+                    className="relative rounded-xl overflow-hidden bg-black group"
+                    style={{ aspectRatio: "4/3" }}
+                  >
+                    <img
+                      src={pendingPhotoDataUrl}
+                      alt="Your selected item"
+                      className="w-full h-full object-cover group-hover:brightness-75 transition-all"
+                    />
+                    <div className="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
+                      <div className="bg-black/50 rounded-full p-2">
+                        <Expand
+                          className="w-5 h-5 text-white"
+                          aria-hidden="true"
+                        />
+                      </div>
+                    </div>
+                  </button>
+                </div>
+
+                {/* Match Photo button */}
+                <Button
+                  data-ocid="checklist.match_button"
+                  onClick={handleMatchPhoto}
+                  className="w-full bg-primary hover:bg-primary/90 text-primary-foreground font-bold gap-2"
+                  style={{ height: "56px", fontSize: "1rem" }}
+                >
+                  <ScanLine className="w-5 h-5" aria-hidden="true" />
+                  Match Photo
+                </Button>
+
+                <button
+                  type="button"
+                  data-ocid="checklist.secondary_button"
+                  onClick={() => {
+                    setVerifyState("idle");
+                    setPendingPhotoDataUrl(null);
+                    fileInputRef.current?.click();
+                  }}
+                  className="self-center text-xs text-muted-foreground underline underline-offset-2 hover:text-foreground transition-colors"
+                >
+                  Select a different photo
+                </button>
+              </div>
+            )}
+
+            {/* ── Verifying: analyzing spinner ── */}
+            {verifyState === "verifying" && (
+              <div
+                data-ocid="checklist.loading_state"
+                className="flex flex-col items-center justify-center gap-4 py-8 rounded-xl border border-border bg-accent/30"
+              >
+                <Loader2
+                  className="w-10 h-10 text-primary animate-spin"
+                  aria-hidden="true"
+                />
+                <div className="text-center">
+                  <p className="text-sm font-semibold text-foreground">
+                    Verifying photo match...
+                  </p>
+                  <p className="text-xs text-muted-foreground mt-1">
+                    Comparing with admin reference
+                  </p>
+                </div>
+              </div>
+            )}
+
+            {/* ── Post-verification states ── */}
+            {(verifyState === "matched" ||
+              verifyState === "no_match" ||
+              (verifyState === "idle" && currentItem.captured)) && (
+              <div className="flex flex-col gap-3">
+                {/* Captured photo display */}
+                {displayPhotoUrl && (
                   <div className="flex flex-col gap-2">
                     {hasReference && (
                       <p className="text-xs font-semibold text-muted-foreground">
-                        Your photo
+                        Your Photo
                       </p>
                     )}
                     <button
@@ -428,7 +511,7 @@ export default function ChecklistScreen({
                       data-ocid="checklist.button"
                       onClick={() =>
                         setLightbox({
-                          src: currentItem.photoDataUrl!,
+                          src: displayPhotoUrl,
                           caption: `${currentItem.name}${
                             currentItem.timestamp
                               ? ` · ${formatTime(currentItem.timestamp)}`
@@ -441,7 +524,7 @@ export default function ChecklistScreen({
                       style={{ aspectRatio: "4/3" }}
                     >
                       <img
-                        src={currentItem.photoDataUrl}
+                        src={displayPhotoUrl}
                         alt={currentItem.name}
                         className="w-full h-full object-cover group-hover:brightness-75 transition-all"
                       />
@@ -467,51 +550,51 @@ export default function ChecklistScreen({
                   </div>
                 )}
 
-                {/* Verification result */}
+                {/* Match success banner */}
                 {verifyState === "matched" && (
-                  <div className="rounded-xl border border-success/40 bg-success/10 flex items-center gap-3 px-4 py-3">
-                    <CheckCircle2
-                      className="w-5 h-5 text-success flex-shrink-0"
-                      aria-hidden="true"
-                    />
-                    <div>
+                  <div
+                    data-ocid="checklist.success_state"
+                    className="rounded-xl border border-success/40 bg-success/10 flex flex-col gap-1 px-4 py-3"
+                  >
+                    <div className="flex items-center gap-3">
+                      <CheckCircle2
+                        className="w-5 h-5 text-success flex-shrink-0"
+                        aria-hidden="true"
+                      />
                       <p className="text-sm font-semibold text-success">
-                        Photo matched!
+                        ✓ Photo Verified — Item confirmed, you can proceed!
                       </p>
-                      {similarityScore !== null && (
-                        <p className="text-xs text-success/70">
-                          Similarity: {Math.round(similarityScore * 100)}% — you
-                          can proceed
-                        </p>
-                      )}
                     </div>
+                    {matchScore !== null && (
+                      <p className="text-xs text-success/70 ml-8">
+                        Match score: {Math.round(matchScore * 100)}%
+                      </p>
+                    )}
                   </div>
                 )}
 
+                {/* No-match error banner */}
                 {verifyState === "no_match" && (
-                  <div className="rounded-xl border border-destructive/40 bg-destructive/10 flex flex-col gap-2 px-4 py-3">
+                  <div
+                    data-ocid="checklist.error_state"
+                    className="rounded-xl border border-destructive/40 bg-destructive/10 flex flex-col gap-2 px-4 py-3"
+                  >
                     <div className="flex items-center gap-3">
                       <XCircle
                         className="w-5 h-5 text-destructive flex-shrink-0"
                         aria-hidden="true"
                       />
-                      <div>
-                        <p className="text-sm font-semibold text-destructive">
-                          Click again, the product is wrong
-                        </p>
-                        {similarityScore !== null && (
-                          <p className="text-xs text-destructive/70">
-                            Similarity: {Math.round(similarityScore * 100)}% —
-                            minimum required:{" "}
-                            {Math.round(MATCH_THRESHOLD * 100)}%
-                          </p>
-                        )}
-                      </div>
+                      <p className="text-sm font-semibold text-destructive">
+                        ✗ Wrong item detected — This does not match the
+                        reference photo. Please select the correct item.
+                      </p>
                     </div>
-                    <p className="text-xs text-muted-foreground">
-                      Make sure you select the correct item matching the admin
-                      reference photo.
-                    </p>
+                    {matchScore !== null && (
+                      <p className="text-xs text-destructive/70">
+                        Match score: {Math.round(matchScore * 100)}% (minimum
+                        45% required)
+                      </p>
+                    )}
                     <Button
                       size="sm"
                       data-ocid="checklist.retake_button"
@@ -519,36 +602,26 @@ export default function ChecklistScreen({
                       className="mt-1 bg-destructive hover:bg-destructive/90 text-destructive-foreground gap-2"
                     >
                       <ImageIcon className="w-3.5 h-3.5" aria-hidden="true" />{" "}
-                      Click Again
+                      Try Again
                     </Button>
                   </div>
                 )}
 
-                {/* No reference: retake + notes */}
+                {/* No reference: retake option */}
                 {verifyState === "idle" && currentItem.captured && (
-                  <>
-                    <button
-                      type="button"
-                      data-ocid="checklist.secondary_button"
-                      onClick={() => fileInputRef.current?.click()}
-                      className="self-start bg-card border border-border rounded-lg px-3 py-1.5 text-xs text-muted-foreground flex items-center gap-1.5 hover:border-primary/50 transition-all"
-                    >
-                      <ImageIcon className="w-3 h-3" aria-hidden="true" />{" "}
-                      Retake
-                    </button>
-                    <Textarea
-                      data-ocid="checklist.textarea"
-                      value={currentItem.notes ?? ""}
-                      onChange={(e) => handleNotesChange(e.target.value)}
-                      placeholder="Add notes for this item..."
-                      className="bg-input border-border text-sm resize-none"
-                      rows={2}
-                    />
-                  </>
+                  <button
+                    type="button"
+                    data-ocid="checklist.secondary_button"
+                    onClick={() => fileInputRef.current?.click()}
+                    className="self-start bg-card border border-border rounded-lg px-3 py-1.5 text-xs text-muted-foreground flex items-center gap-1.5 hover:border-primary/50 transition-all"
+                  >
+                    <ImageIcon className="w-3 h-3" aria-hidden="true" /> Retake
+                  </button>
                 )}
 
-                {/* After match success: notes */}
-                {verifyState === "matched" && (
+                {/* Notes textarea */}
+                {(verifyState === "matched" ||
+                  (verifyState === "idle" && currentItem.captured)) && (
                   <Textarea
                     data-ocid="checklist.textarea"
                     value={currentItem.notes ?? ""}
@@ -581,15 +654,7 @@ export default function ChecklistScreen({
               className="flex-1 bg-primary hover:bg-primary/90 disabled:opacity-40 gap-2"
               style={{ height: "52px" }}
             >
-              {verifyState === "verifying" ? (
-                <>
-                  <Loader2
-                    className="w-4 h-4 animate-spin"
-                    aria-hidden="true"
-                  />{" "}
-                  Verifying...
-                </>
-              ) : currentIndex === total - 1 ? (
+              {currentIndex === total - 1 ? (
                 "Finish ✓"
               ) : (
                 <>
@@ -607,7 +672,7 @@ export default function ChecklistScreen({
                 className="w-3.5 h-3.5 flex-shrink-0"
                 aria-hidden="true"
               />
-              Click again and select the correct product to continue.
+              Click "Try Again" and select the correct product to continue.
             </div>
           )}
         </main>

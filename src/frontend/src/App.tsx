@@ -28,7 +28,11 @@ function loadDispatches(): Dispatch[] {
 }
 
 function saveDispatches(dispatches: Dispatch[]) {
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(dispatches));
+  try {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(dispatches));
+  } catch {
+    // Quota exceeded — silently ignore; state is already updated in memory
+  }
 }
 
 function loadToolkitReferences(): ToolkitReferences {
@@ -74,7 +78,11 @@ export default function App() {
 
   const handleUpdateToolkitReferences = (refs: ToolkitReferences) => {
     setToolkitReferences(refs);
-    localStorage.setItem(TOOLKIT_REF_KEY, JSON.stringify(refs));
+    try {
+      localStorage.setItem(TOOLKIT_REF_KEY, JSON.stringify(refs));
+    } catch {
+      // Storage quota exceeded — references persist in React state for this session
+    }
   };
 
   const handleLogin = (u: AuthUser) => {
